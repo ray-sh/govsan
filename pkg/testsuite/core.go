@@ -206,8 +206,8 @@ func SetupVCConnection(tc *TestContext) (*govmomi.Client, error) {
 // 生命周期管理
 // =============================================================================
 
-// TestLifecycle 管理测试生命周期钩子
-type TestLifecycle struct {
+// TestManager 管理测试生命周期钩子
+type TestManager struct {
 	parentCtx   *TestContext
 	beforeSuite []func()
 	afterSuite  []func()
@@ -215,9 +215,10 @@ type TestLifecycle struct {
 	afterTest   []func(name string)
 }
 
-// NewTestLifecycle 创建绑定了父上下文的生命周期管理器（确保子测试能继承 BeforeSuite 的连接数据）
-func NewTestLifecycle(parentCtx *TestContext) *TestLifecycle {
-	return &TestLifecycle{
+// NewTestManager creates a manager bound to the parent context
+// This ensures child tests can inherit BeforeSuite connection data
+func NewTestManager(parentCtx *TestContext) *TestManager {
+	return &TestManager{
 		parentCtx: parentCtx,
 	}
 }
@@ -226,19 +227,19 @@ func NewTestLifecycle(parentCtx *TestContext) *TestLifecycle {
 // the vsan.Service and target cluster in the parent context.
 // Returns the govmomi.Client for cleanup in AfterSuite.
 // If connection fails or GOVC_URL is not set, it calls t.Skip() and returns nil.
-func (tl *TestLifecycle) SetupVCConnection() (*govmomi.Client, error) {
-	if tl.parentCtx == nil {
+func (tm *TestManager) SetupVCConnection() (*govmomi.Client, error) {
+	if tm.parentCtx == nil {
 		return nil, errors.New("parent context is nil")
 	}
 
-	client, err := SetupVCConnection(tl.parentCtx)
+	client, err := SetupVCConnection(tm.parentCtx)
 	if err != nil {
-		tl.parentCtx.T.Skipf("Skipping test: Failed to connect to vCenter/vcsim: %v", err)
+		tm.parentCtx.T.Skipf("Skipping test: Failed to connect to vCenter/vcsim: %v", err)
 		return nil, err
 	}
 
 	if client == nil {
-		tl.parentCtx.T.Skip("Skipping test: No vCenter/vcsim connection available")
+		tm.parentCtx.T.Skip("Skipping test: No vCenter/vcsim connection available")
 		return nil, nil
 	}
 
@@ -246,37 +247,37 @@ func (tl *TestLifecycle) SetupVCConnection() (*govmomi.Client, error) {
 }
 
 // BeforeSuite 注册套件前钩子
-func (tl *TestLifecycle) BeforeSuite(fn func()) {
-	tl.beforeSuite = append(tl.beforeSuite, fn)
+func (tm *TestManager) BeforeSuite(fn func()) {
+	tm.beforeSuite = append(tm.beforeSuite, fn)
 }
 
 // AfterSuite 注册套件后钩子
-func (tl *TestLifecycle) AfterSuite(fn func()) {
-	tl.afterSuite = append(tl.afterSuite, fn)
+func (tm *TestManager) AfterSuite(fn func()) {
+	tm.afterSuite = append(tm.afterSuite, fn)
 }
 
 // BeforeTest 注册测试前钩子
-func (tl *TestLifecycle) BeforeTest(fn func(name string)) {
-	tl.beforeTest = append(tl.beforeTest, fn)
+func (tm *TestManager) BeforeTest(fn func(name string)) {
+	tm.beforeTest = append(tm.beforeTest, fn)
 }
 
 // AfterTest 注册测试后钩子
-func (tl *TestLifecycle) AfterTest(fn func(name string)) {
-	tl.afterTest = append(tl.afterTest, fn)
+func (tm *TestManager) AfterTest(fn func(name string)) {
+	tm.afterTest = append(tm.afterTest, fn)
 }
 
 // RunSuite 运行测试套件
-func (tl *TestLifecycle) RunSuite(t *testing.T, tests map[string]func(*TestContext)) {
+func (tm *TestManager) RunSuite(t *testing.T, tests map[string]func(*TestContext)) {
 	t.Helper()
 
 	// 执行套件前钩子
-	for _, fn := range tl.beforeSuite {
+	for _, fn := range tm.beforeSuite {
 		fn()
 	}
 
 	// 执行测试后清理钩子
 	defer func() {
-		for _, fn := range tl.afterSuite {
+		for _, fn := range tm.afterSuite {
 			fn()
 		}
 	}()
@@ -288,20 +289,20 @@ func (tl *TestLifecycle) RunSuite(t *testing.T, tests map[string]func(*TestConte
 
 			// 核心修复：通过 NewChildContext 深度拷贝父级上下文里的连接会话数据
 			var subCtx *TestContext
-			if tl.parentCtx != nil {
-				subCtx = NewChildContext(subT, tl.parentCtx)
+			if tm.parentCtx != nil {
+				subCtx = NewChildContext(subT, tm.parentCtx)
 			} else {
 				subCtx = NewTestContext(subT)
 			}
 
 			// 执行单项测试前钩子
-			for _, fn := range tl.beforeTest {
+			for _, fn := range tm.beforeTest {
 				fn(name)
 			}
 
 			defer func() {
 				// 执行单项测试后钩子
-				for _, fn := range tl.afterTest {
+				for _, fn := range tm.afterTest {
 					fn(name)
 				}
 			}()

@@ -8,7 +8,7 @@ import (
 
 func TestConfigTestSuite(t *testing.T) {
 	ctx := testsuite.NewTestContext(t)
-	lifecycle := testsuite.NewTestLifecycle(ctx)
+	lifecycle := testsuite.NewTestManager(ctx)
 	
 	lifecycle.BeforeSuite(func() {
 		testsuite.Log(ctx.T, "Setting up ConfigTestSuite...")

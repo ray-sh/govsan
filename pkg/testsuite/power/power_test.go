@@ -38,7 +38,7 @@ func (c *MetricsCollector) GetSamples() []map[string]interface{} {
 
 func TestPowerTestSuite(t *testing.T) {
 	ctx := testsuite.NewTestContext(t)
-	lifecycle := testsuite.NewTestLifecycle(ctx)
+	lifecycle := testsuite.NewTestManager(ctx)
 	
 	collector := NewMetricsCollector()
 	baseline := map[string]float64{

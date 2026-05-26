@@ -9,7 +9,7 @@ import (
 
 func TestHealthStatusManagementSuite(t *testing.T) {
 	ctx := testsuite.NewTestContext(t)
-	lifecycle := testsuite.NewTestLifecycle(ctx)
+	lifecycle := testsuite.NewTestManager(ctx)
 
 	var manager *HealthStatusManager
 	var testStartTime time.Time

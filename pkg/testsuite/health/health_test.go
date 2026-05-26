@@ -10,7 +10,7 @@ import (
 
 func TestHealthTestSuite(t *testing.T) {
 	ctx := testsuite.NewTestContext(t)
-	lifecycle := testsuite.NewTestLifecycle(ctx)
+	lifecycle := testsuite.NewTestManager(ctx)
 
 	var checker *RealHealthChecker
 

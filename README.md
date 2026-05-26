@@ -44,10 +44,10 @@ type TestContext struct {
 - `Get(key string) (interface{}, bool)`：获取测试数据
 - `GetInt(key string, defaultVal int) int`：获取整数数据
 
-#### 1.2.2 TestLifecycle - 生命周期管理器
+#### 1.2.2 TestManager - 生命周期管理器
 
 ```go
-type TestLifecycle struct {
+type TestManager struct {
     beforeSuite []func()
     afterSuite  []func()
     beforeTest  []func(name string)
@@ -72,7 +72,7 @@ type TestLifecycle struct {
 ```
 Test*TestSuite 入口
     │
-    ├─ 创建 TestLifecycle
+    ├─ 创建 TestManager
     │
     ├─ 创建 TestContext
     │
@@ -119,7 +119,7 @@ Test*TestSuite 入口
     │
     ├─ import "govsan/pkg/testsuite"
     │
-    ├─ 使用 NewTestLifecycle() 创建生命周期
+    ├─ 使用 NewTestManager() 创建生命周期
     ├─ 使用 NewTestContext(t) 创建上下文
     ├─ 使用 Log/Logf 记录日志
     ├─ 使用 Assertf/Requiref 进行断言
@@ -165,7 +165,7 @@ import (
 )
 
 func TestHealthTestSuite(t *testing.T) {
-    lifecycle := testsuite.NewTestLifecycle()
+    lifecycle := testsuite.NewTestManager()
     ctx := testsuite.NewTestContext(t)
 
     var client *VSanClient
@@ -243,7 +243,7 @@ import (
 )
 
 func TestConfigTestSuite(t *testing.T) {
-    lifecycle := testsuite.NewTestLifecycle()
+    lifecycle := testsuite.NewTestManager()
     ctx := testsuite.NewTestContext(t)
 
     var configMap map[string]interface{}
@@ -329,7 +329,7 @@ import (
 // ==================== 测试函数 ====================
 
 func TestDiskHealthTestSuite(t *testing.T) {
-    lifecycle := testsuite.NewTestLifecycle()
+    lifecycle := testsuite.NewTestManager()
     ctx := testsuite.NewTestContext(t)
 
     // 需要真实 vCenter 或 vcsim 连接
