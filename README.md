@@ -489,6 +489,128 @@ go test -v ./pkg/testsuite/...
 
 ---
 
+## 4. 针对真实 vCenter 测试指南
+
+### 4.1 环境准备
+
+在运行测试前，需要设置以下环境变量：
+
+```bash
+# 必需变量
+export GOVC_URL="https://your-vcenter.example.com/sdk"
+export GOVC_USERNAME="administrator@vsphere.local"
+export GOVC_PASSWORD="your-password"
+
+# 可选变量
+export GOVC_INSECURE="true"                    # 跳过证书验证（测试环境常用）
+export VSAN_CLUSTER_PATH="/datacenter/cluster" # 指定目标集群路径
+```
+
+### 4.2 使用 vcsim 模拟器（开发推荐）
+
+如果没有真实 vCenter，可以使用 govmomi 自带的模拟器：
+
+```bash
+# 启动 vcsim
+vcsim -start
+
+# 设置环境变量指向模拟器
+export GOVC_URL="https://localhost:8989/sdk"
+export GOVC_USERNAME="user"
+export GOVC_PASSWORD="password"
+export GOVC_INSECURE="true"
+```
+
+### 4.3 运行测试命令
+
+```bash
+# 运行所有测试
+cd /home/lei/codes/govsan
+go test -v ./pkg/testsuite/...
+
+# 运行特定模块
+go test -v ./pkg/testsuite/health/
+go test -v ./pkg/testsuite/health -run TestHealthTestSuite
+
+# 只运行特定测试用例
+go test -v ./pkg/testsuite/health -run TestHealthTestSuite/TestClusterSummary
+```
+
+### 4.4 测试执行流程
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  1. BeforeSuite 阶段                                        │
+│     └─ SetupVCConnection() 建立 vCenter 连接                 │
+│         ├─ 读取环境变量 (GOVC_URL, GOVC_USERNAME, ...)       │
+│         ├─ 建立 govmomi.Client 连接                         │
+│         ├─ 初始化 vSAN Client                               │
+│         └─ 查找目标集群并存入 TestContext                    │
+├─────────────────────────────────────────────────────────────┤
+│  2. 测试执行阶段                                            │
+│     └─ 使用 RealHealthChecker 调用真实 vSAN API             │
+│         ├─ CheckObjectHealth() → VsanQueryObjectIdentities  │
+│         ├─ CheckDiskHealth()   → VsanClusterGetConfig       │
+│         ├─ CheckNetworkHealth() → 查询主机网络信息          │
+│         └─ CheckDataEfficiency() → 查询性能指标             │
+├─────────────────────────────────────────────────────────────┤
+│  3. AfterSuite 阶段                                         │
+│     └─ checker.Close() 关闭 vCenter 连接                    │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 4.5 测试输出示例
+
+```bash
+$ go test -v ./pkg/testsuite/health -run TestHealthTestSuite
+
+=== RUN   TestHealthTestSuite
+    health_test.go:18: Setting up HealthTestSuite...
+    health_test.go:21: Connecting to vCenter (real or vcsim)...
+    health_test.go:25: Successfully connected to vCenter/vcsim
+    health_test.go:43: Using RealHealthChecker with real vSAN API calls
+=== RUN   TestHealthTestSuite/TestClusterSummary
+    health_test.go:93: Running TestClusterSummary...
+    health_test.go:96: Cluster summary: 4 checks, 4 OK, 0 Warning, 0 Error
+=== RUN   TestHealthTestSuite/TestVsanClusterHealth
+    health_test.go:75: Running TestVsanClusterHealth...
+    health_test.go:82: Object Health: OK - Object health is normal...
+    health_test.go:83: Disk Health: OK - Disk health is normal...
+    ...
+--- PASS: TestHealthTestSuite (15.23s)
+    --- PASS: TestHealthTestSuite/TestClusterSummary (2.15s)
+    --- PASS: TestHealthTestSuite/TestVsanClusterHealth (13.08s)
+PASS
+ok      govsan/pkg/testsuite/health     15.251s
+```
+
+### 4.6 场景行为说明
+
+| 场景 | 行为 |
+|------|------|
+| 已配置 GOVC_URL | 执行真实 API 调用测试 |
+| 未配置 GOVC_URL | 测试自动跳过（`t.Skip()`） |
+| 连接失败 | 测试跳过并记录错误信息 |
+| 证书验证失败 | 设置 `GOVC_INSECURE=true` |
+
+### 4.7 推荐工作流程
+
+```bash
+# 1. 在终端设置环境变量（或写入 ~/.bashrc）
+export GOVC_URL="https://vc.example.com/sdk"
+export GOVC_USERNAME="admin@vsphere.local"
+export GOVC_PASSWORD="secret"
+export GOVC_INSECURE="true"
+
+# 2. 运行测试
+go test -v ./pkg/testsuite/health/
+
+# 3. 查看测试报告
+# PASS/FAIL 结果会显示每个测试的执行情况
+```
+
+---
+
 ## 附录
 
 ### A. 运行测试命令
