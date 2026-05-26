@@ -4,6 +4,7 @@ package vsan
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"os"
 	"time"
 
@@ -51,16 +52,18 @@ func Connect(ctx context.Context, config *ConnectionConfig) (*govmomi.Client, er
 	defer cancel()
 
 	// Parse the vCenter URL
-	url, err := soap.ParseURL(config.URL)
+	u, err := soap.ParseURL(config.URL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse vCenter URL: %w", err)
 	}
 
 	// Set credentials
-	url.User = vim25.NewUserPassword(url.User.URL(), config.Username, config.Password)
+	if config.Username != "" && config.Password != "" {
+		u.User = url.UserPassword(config.Username, config.Password)
+	}
 
 	// Connect to vCenter
-	client, err := govmomi.NewClient(ctx, url, config.Insecure)
+	client, err := govmomi.NewClient(ctx, u, config.Insecure)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to vCenter: %w", err)
 	}

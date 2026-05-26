@@ -1,37 +1,54 @@
 package health
 
 import (
-	"fmt"
 	"testing"
 
+	"github.com/vmware/govmomi/vim25/types"
+
 	"govsan/pkg/testsuite"
-	"govsan/pkg/vsan"
 )
 
 func TestHealthTestSuite(t *testing.T) {
 	ctx := testsuite.NewTestContext(t)
 	lifecycle := testsuite.NewTestLifecycle(ctx)
 
-	checker := NewHealthChecker()
+	var checker HealthChecker
+	var realChecker *RealHealthChecker
 	healthRecords := make(map[string]HealthStatus)
-	var vcClient interface{}
 
 	lifecycle.BeforeSuite(func() {
 		testsuite.Log(ctx.T, "Setting up HealthTestSuite...")
 
-		// Connect to real vCenter
+		// Try to connect to real vCenter
 		testsuite.Log(ctx.T, "Connecting to vCenter...")
 		vc, err := testsuite.SetupVCConnection(ctx)
 		if err != nil {
 			testsuite.Logf(ctx.T, "Failed to connect to vCenter: %v", err)
-			t.Skip("Skipping real vCenter tests")
-			return
+			testsuite.Log(ctx.T, "Falling back to mock health checker")
 		}
-		vcClient = vc
 
 		if vc != nil {
 			testsuite.Log(ctx.T, "Successfully connected to vCenter")
-			testsuite.Log(ctx.T, "vSAN health checks will query real cluster data")
+
+			// Get cluster from context (set by SetupVCConnection)
+			cluster, ok := ctx.Get("target_cluster")
+			if !ok || cluster == nil {
+				testsuite.Log(ctx.T, "Warning: No target cluster found, using mock checker")
+				checker = NewHealthChecker()
+			} else {
+				// Use RealHealthChecker for real API calls
+				realChecker, err = NewRealHealthChecker(ctx.Ctx, vc, cluster.(types.ManagedObjectReference))
+				if err != nil {
+					testsuite.Logf(ctx.T, "Failed to create RealHealthChecker: %v", err)
+					checker = NewHealthChecker()
+				} else {
+					checker = realChecker
+					testsuite.Log(ctx.T, "Using RealHealthChecker with real vSAN API calls")
+				}
+			}
+		} else {
+			testsuite.Log(ctx.T, "Using mock health checker (no vCenter connection)")
+			checker = NewHealthChecker()
 		}
 
 		lifecycle.BeforeTest(func(name string) {
@@ -51,8 +68,11 @@ func TestHealthTestSuite(t *testing.T) {
 		}
 
 		// Cleanup vCenter connection
-		if vcClient != nil {
-			testsuite.Log(ctx.T, "Disconnecting from vCenter...")
+		if realChecker != nil {
+			testsuite.Log(ctx.T, "Closing vCenter connection...")
+			if err := realChecker.Close(); err != nil {
+				testsuite.Logf(ctx.T, "Error closing connection: %v", err)
+			}
 		}
 	})
 
@@ -68,36 +88,28 @@ func TestHealthTestSuite(t *testing.T) {
 	lifecycle.RunSuite(t, tests)
 }
 
-func testVsanClusterHealth(ctx *testsuite.TestContext, checker *SimpleHealthChecker) {
+func testVsanClusterHealth(ctx *testsuite.TestContext, checker HealthChecker) {
 	testsuite.Log(ctx.T, "Running TestVsanClusterHealth...")
 
-	// Get vSAN service from context (set by SetupVCConnection)
-	vsanService, ok := ctx.Get("vsan_service")
-	if !ok || vsanService == nil {
-		testsuite.Log(ctx.T, "vSAN service not available, running mock health checks")
-		// Fallback to mock checker
-		summary := checker.GetClusterSummary()
-		testsuite.Assertf(ctx.T, summary.TotalChecks > 0, "No health checks performed")
-		testsuite.Logf(ctx.T, "Mock cluster summary: %d checks, %d OK, %d Warning, %d Error",
-			summary.TotalChecks, summary.OKCount, summary.WarningCount, summary.ErrorCount)
-		return
-	}
+	// Perform detailed vSAN health checks
+	objectHealth := checker.CheckObjectHealth()
+	diskHealth := checker.CheckDiskHealth()
+	networkHealth := checker.CheckNetworkHealth()
+	dataEfficiency := checker.CheckDataEfficiency()
 
-	// Use real vSAN service
-	service := vsanService.(*vsan.Service)
-	cluster, ok := ctx.Get("target_cluster")
-	if !ok || cluster == nil {
-		testsuite.RequireNoError(ctx.T, fmt.Errorf("target cluster not found in context"), "cluster not found")
-		return
-	}
+	testsuite.Logf(ctx.T, "Object Health: %s - %s", objectHealth.Status, objectHealth.Message)
+	testsuite.Logf(ctx.T, "Disk Health: %s - %s", diskHealth.Status, diskHealth.Message)
+	testsuite.Logf(ctx.T, "Network Health: %s - %s", networkHealth.Status, networkHealth.Message)
+	testsuite.Logf(ctx.T, "Data Efficiency: %s - %s", dataEfficiency.Status, dataEfficiency.Message)
 
-	testsuite.Logf(ctx.T, "Querying vSAN cluster health for: %v", cluster)
-	// Use the service for real vSAN queries
-	_ = service
-	testsuite.Log(ctx.T, "Real vCenter health checks would be performed here")
+	// Assert that we got results
+	testsuite.RequireNoError(ctx.T, objectHealth.Error, "Object health check failed")
+	testsuite.RequireNoError(ctx.T, diskHealth.Error, "Disk health check failed")
+	testsuite.RequireNoError(ctx.T, networkHealth.Error, "Network health check failed")
+	testsuite.RequireNoError(ctx.T, dataEfficiency.Error, "Data efficiency check failed")
 }
 
-func testClusterSummary(ctx *testsuite.TestContext, checker *SimpleHealthChecker) {
+func testClusterSummary(ctx *testsuite.TestContext, checker HealthChecker) {
 	testsuite.Log(ctx.T, "Running TestClusterSummary...")
 	summary := checker.GetClusterSummary()
 	testsuite.Assertf(ctx.T, summary.TotalChecks > 0, "No health checks performed")
