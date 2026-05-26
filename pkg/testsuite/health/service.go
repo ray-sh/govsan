@@ -52,51 +52,13 @@ type HealthHistoryRecord struct {
 }
 
 // HealthChecker defines the interface for health check operations.
+// Implementations should connect to real vCenter or vcsim for actual API calls.
 type HealthChecker interface {
 	CheckObjectHealth() *HealthResult
 	CheckDiskHealth() *HealthResult
 	CheckNetworkHealth() *HealthResult
 	CheckDataEfficiency() *HealthResult
 	GetClusterSummary() *ClusterSummary
-}
-
-// SimpleHealthChecker is a simple implementation of HealthChecker.
-type SimpleHealthChecker struct{}
-
-// NewHealthChecker creates a new instance of SimpleHealthChecker.
-func NewHealthChecker() *SimpleHealthChecker {
-	return &SimpleHealthChecker{}
-}
-
-// CheckObjectHealth checks the health of vSAN objects.
-func (c *SimpleHealthChecker) CheckObjectHealth() *HealthResult {
-	return &HealthResult{Status: HealthStatusOK, Message: "Object health is normal", Error: nil}
-}
-
-// CheckDiskHealth checks the health of disks.
-func (c *SimpleHealthChecker) CheckDiskHealth() *HealthResult {
-	return &HealthResult{Status: HealthStatusOK, Message: "Disk health is normal", Error: nil}
-}
-
-// CheckNetworkHealth checks the health of network.
-func (c *SimpleHealthChecker) CheckNetworkHealth() *HealthResult {
-	return &HealthResult{Status: HealthStatusWarning, Message: "Network latency is elevated", Error: nil}
-}
-
-// CheckDataEfficiency checks the health of data efficiency.
-func (c *SimpleHealthChecker) CheckDataEfficiency() *HealthResult {
-	return &HealthResult{Status: HealthStatusOK, Message: "Data efficiency is optimal", Error: nil}
-}
-
-// GetClusterSummary gets the summary of cluster health.
-func (c *SimpleHealthChecker) GetClusterSummary() *ClusterSummary {
-	return &ClusterSummary{
-		TotalChecks: 4, OKCount: 3, WarningCount: 1, ErrorCount: 0,
-		Details: []HealthResult{
-			*c.CheckObjectHealth(), *c.CheckDiskHealth(),
-			*c.CheckNetworkHealth(), *c.CheckDataEfficiency(),
-		},
-	}
 }
 
 // HealthStatusManager manages health status evaluation and history.

@@ -332,7 +332,14 @@ func TestDiskHealthTestSuite(t *testing.T) {
     lifecycle := testsuite.NewTestLifecycle()
     ctx := testsuite.NewTestContext(t)
 
-    checker := NewHealthChecker()
+    // 需要真实 vCenter 或 vcsim 连接
+    vc, err := testsuite.SetupVCConnection(ctx)
+    if err != nil || vc == nil {
+        t.Skip("需要 vCenter 或 vcsim 连接")
+    }
+
+    cluster, _ := ctx.Get("target_cluster")
+    checker, _ := NewRealHealthChecker(ctx.Ctx, vc, cluster.(types.ManagedObjectReference))
     diskReports := make(map[string]DiskHealthReport)
 
     // 注册钩子

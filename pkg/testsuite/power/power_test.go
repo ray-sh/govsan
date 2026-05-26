@@ -37,8 +37,8 @@ func (c *MetricsCollector) GetSamples() []map[string]interface{} {
 }
 
 func TestPowerTestSuite(t *testing.T) {
-	lifecycle := testsuite.NewTestLifecycle()
 	ctx := testsuite.NewTestContext(t)
+	lifecycle := testsuite.NewTestLifecycle(ctx)
 	
 	collector := NewMetricsCollector()
 	baseline := map[string]float64{
@@ -119,7 +119,7 @@ func testMetricsAggregation(ctx *testsuite.TestContext, collector *MetricsCollec
 	testsuite.Log(ctx.T, "Running TestMetricsAggregation...")
 	for i := 0; i < 3; i++ {
 		err := collector.Collect()
-		testsuite.RequireNoError(ctx.T, err)
+		testsuite.RequireNoError(ctx.T, err, "Metrics collection failed")
 		*metricsData = append(*metricsData, map[string]interface{}{"cpu": 45.5})
 	}
 	testsuite.Assertf(ctx.T, len(*metricsData) > 0, "Aggregation produced no results")
@@ -129,28 +129,21 @@ func testMetricsAggregation(ctx *testsuite.TestContext, collector *MetricsCollec
 func testPowerHealthCorrelation(ctx *testsuite.TestContext) {
 	testsuite.Log(ctx.T, "Running TestPowerHealthCorrelation...")
 
-	// Use health module's NewHealthChecker from different package
-	checker := health.NewHealthChecker()
-	testsuite.Assertf(ctx.T, checker != nil, "HealthChecker should not be nil")
-
-	// Perform health check
-	objectHealth := checker.CheckObjectHealth()
-	testsuite.RequireNoError(ctx.T, objectHealth.Error, "Object health check failed")
-	testsuite.Assertf(ctx.T, objectHealth.Status == health.HealthStatusOK,
-		"Expected object health OK, got %s", objectHealth.Status)
-
-	// Get cluster summary from health module
-	summary := checker.GetClusterSummary()
-	testsuite.Assertf(ctx.T, summary.TotalChecks > 0, "Should have health checks")
-	testsuite.Assertf(ctx.T, summary.OKCount >= 3, "Expected at least 3 OK checks, got %d", summary.OKCount)
-
-	// Use health module's HealthStatusManager
+	// Use health module's HealthStatusManager (still available)
 	manager := health.NewHealthStatusManager()
 	manager.AddThresholdRule("PowerConsumption", 80.0, 95.0)
 	status := manager.EvaluateStatus("PowerConsumption", 75.0)
 	testsuite.Assertf(ctx.T, status == health.HealthStatusOK,
 		"Expected OK status for low power consumption")
 
-	testsuite.Logf(ctx.T, "Power-Health Correlation Test: %d checks, %d OK, %d Warning",
-		summary.TotalChecks, summary.OKCount, summary.WarningCount)
+	// Test status evaluation with different values
+	status = manager.EvaluateStatus("PowerConsumption", 85.0)
+	testsuite.Assertf(ctx.T, status == health.HealthStatusWarning,
+		"Expected Warning status for medium power consumption")
+
+	status = manager.EvaluateStatus("PowerConsumption", 96.0)
+	testsuite.Assertf(ctx.T, status == health.HealthStatusError,
+		"Expected Error status for high power consumption")
+
+	testsuite.Log(ctx.T, "Power-Health Correlation Test completed")
 }

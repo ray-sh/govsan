@@ -12,44 +12,47 @@ func TestHealthTestSuite(t *testing.T) {
 	ctx := testsuite.NewTestContext(t)
 	lifecycle := testsuite.NewTestLifecycle(ctx)
 
-	var checker HealthChecker
-	var realChecker *RealHealthChecker
-	healthRecords := make(map[string]HealthStatus)
+	var checker *RealHealthChecker
 
 	lifecycle.BeforeSuite(func() {
 		testsuite.Log(ctx.T, "Setting up HealthTestSuite...")
 
-		// Try to connect to real vCenter
-		testsuite.Log(ctx.T, "Connecting to vCenter...")
+		// Require real vCenter or vcsim connection
+		testsuite.Log(ctx.T, "Connecting to vCenter (real or vcsim)...")
 		vc, err := testsuite.SetupVCConnection(ctx)
 		if err != nil {
-			testsuite.Logf(ctx.T, "Failed to connect to vCenter: %v", err)
-			testsuite.Log(ctx.T, "Falling back to mock health checker")
+			t.Skipf("Skipping test: Failed to connect to vCenter/vcsim: %v", err)
+			return
 		}
 
-		if vc != nil {
-			testsuite.Log(ctx.T, "Successfully connected to vCenter")
-
-			// Get cluster from context (set by SetupVCConnection)
-			cluster, ok := ctx.Get("target_cluster")
-			if !ok || cluster == nil {
-				testsuite.Log(ctx.T, "Warning: No target cluster found, using mock checker")
-				checker = NewHealthChecker()
-			} else {
-				// Use RealHealthChecker for real API calls
-				realChecker, err = NewRealHealthChecker(ctx.Ctx, vc, cluster.(types.ManagedObjectReference))
-				if err != nil {
-					testsuite.Logf(ctx.T, "Failed to create RealHealthChecker: %v", err)
-					checker = NewHealthChecker()
-				} else {
-					checker = realChecker
-					testsuite.Log(ctx.T, "Using RealHealthChecker with real vSAN API calls")
-				}
-			}
-		} else {
-			testsuite.Log(ctx.T, "Using mock health checker (no vCenter connection)")
-			checker = NewHealthChecker()
+		if vc == nil {
+			t.Skip("Skipping test: No vCenter/vcsim connection available")
+			return
 		}
+
+		testsuite.Log(ctx.T, "Successfully connected to vCenter/vcsim")
+
+		// Get cluster from context (set by SetupVCConnection)
+		clusterVal, ok := ctx.Get("target_cluster")
+		if !ok || clusterVal == nil {
+			t.Skip("Skipping test: No target cluster found in context")
+			return
+		}
+
+		cluster, ok := clusterVal.(types.ManagedObjectReference)
+		if !ok {
+			t.Skip("Skipping test: Invalid cluster type in context")
+			return
+		}
+
+		// Create RealHealthChecker with actual API calls
+		checker, err = NewRealHealthChecker(ctx.Ctx, vc, cluster)
+		if err != nil {
+			t.Skipf("Skipping test: Failed to create RealHealthChecker: %v", err)
+			return
+		}
+
+		testsuite.Log(ctx.T, "Using RealHealthChecker with real vSAN API calls")
 
 		lifecycle.BeforeTest(func(name string) {
 			testsuite.Log(ctx.T, "Before health check:", name)
@@ -62,15 +65,11 @@ func TestHealthTestSuite(t *testing.T) {
 
 	lifecycle.AfterSuite(func() {
 		testsuite.Log(ctx.T, "Tearing down HealthTestSuite...")
-		testsuite.Log(ctx.T, "=== Health Summary ===")
-		for component, status := range healthRecords {
-			testsuite.Logf(ctx.T, "  %s: %s", component, status)
-		}
 
 		// Cleanup vCenter connection
-		if realChecker != nil {
+		if checker != nil {
 			testsuite.Log(ctx.T, "Closing vCenter connection...")
-			if err := realChecker.Close(); err != nil {
+			if err := checker.Close(); err != nil {
 				testsuite.Logf(ctx.T, "Error closing connection: %v", err)
 			}
 		}
