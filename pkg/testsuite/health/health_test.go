@@ -17,19 +17,12 @@ func TestHealthTestSuite(t *testing.T) {
 	lifecycle.BeforeSuite(func() {
 		testsuite.Log(ctx.T, "Setting up HealthTestSuite...")
 
-		// Require real vCenter or vcsim connection
+		// Connect to vCenter or vcsim using lifecycle helper
 		testsuite.Log(ctx.T, "Connecting to vCenter (real or vcsim)...")
-		vc, err := testsuite.SetupVCConnection(ctx)
-		if err != nil {
-			t.Skipf("Skipping test: Failed to connect to vCenter/vcsim: %v", err)
-			return
+		vc, err := lifecycle.SetupVCConnection()
+		if err != nil || vc == nil {
+			return // Skip already handled by SetupVCConnection
 		}
-
-		if vc == nil {
-			t.Skip("Skipping test: No vCenter/vcsim connection available")
-			return
-		}
-
 		testsuite.Log(ctx.T, "Successfully connected to vCenter/vcsim")
 
 		// Get cluster from context (set by SetupVCConnection)

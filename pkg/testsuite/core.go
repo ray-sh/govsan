@@ -222,6 +222,29 @@ func NewTestLifecycle(parentCtx *TestContext) *TestLifecycle {
 	}
 }
 
+// SetupVCConnection establishes a connection to vCenter/vcsim and stores
+// the vsan.Service and target cluster in the parent context.
+// Returns the govmomi.Client for cleanup in AfterSuite.
+// If connection fails or GOVC_URL is not set, it calls t.Skip() and returns nil.
+func (tl *TestLifecycle) SetupVCConnection() (*govmomi.Client, error) {
+	if tl.parentCtx == nil {
+		return nil, errors.New("parent context is nil")
+	}
+
+	client, err := SetupVCConnection(tl.parentCtx)
+	if err != nil {
+		tl.parentCtx.T.Skipf("Skipping test: Failed to connect to vCenter/vcsim: %v", err)
+		return nil, err
+	}
+
+	if client == nil {
+		tl.parentCtx.T.Skip("Skipping test: No vCenter/vcsim connection available")
+		return nil, nil
+	}
+
+	return client, nil
+}
+
 // BeforeSuite 注册套件前钩子
 func (tl *TestLifecycle) BeforeSuite(fn func()) {
 	tl.beforeSuite = append(tl.beforeSuite, fn)
