@@ -8,7 +8,7 @@ import (
 	"govsan/pkg/testsuite/health"
 )
 
-// MetricsCollector - 指标收集器
+// MetricsCollector - collects performance metrics
 type MetricsCollector struct {
 	samples []map[string]interface{}
 }

@@ -13,14 +13,14 @@ import (
 
 var ErrNilVIMClient = errors.New("vim client is nil")
 
-// Client 结构体：纯粹的数据载体
+// Client struct: pure data carrier
 type Client struct {
-	*vsan.Client            // 匿名组合：这让 Client 直接拥有了 VsanClusterGetConfig 等所有底层方法！
+	*vsan.Client            // Anonymous composition: allows Client to directly access all low-level methods like VsanClusterGetConfig
 	vimClient *vim25.Client
 }
 
 // ---------------------------------------------------------
-// 核心构造函数（保留，用于单元测试和依赖注入）
+// Core constructor (retained for unit testing and dependency injection)
 // ---------------------------------------------------------
 func NewClient(ctx context.Context, vimClient *vim25.Client) (*Client, error) {
 	if vimClient == nil {
@@ -36,13 +36,13 @@ func NewClient(ctx context.Context, vimClient *vim25.Client) (*Client, error) {
 	}, nil
 }
 
-// 获取底层发包引擎
+// GetVIMClient returns the underlying VIM client
 func (c *Client) GetVIMClient() *vim25.Client {
 	return c.vimClient
 }
 
 // ---------------------------------------------------------
-// 真实环境连接辅助函数（强烈建议保留）
+// Real-world connection helper function (highly recommended to retain)
 // ---------------------------------------------------------
 func NewClientFromEnv(ctx context.Context) (*Client, error) {
 	vcURL := os.Getenv("GOVC_URL")

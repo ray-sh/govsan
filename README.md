@@ -1,162 +1,155 @@
-# GovSAN 测试框架技术文档
+# GovSAN Testing Framework Technical Documentation
 
-## 目录
+## Table of Contents
 
-1. [框架执行机制说明](#1-框架执行机制说明)
-2. [Before/After Test Hook 定制指南](#2-beforeafter-test-hook-定制指南)
-3. [健康检查测试扩展步骤](#3-健康检查测试扩展步骤)
+1. [Framework Execution Mechanism](#1-framework-execution-mechanism)
+2. [Before/After Test Hook Customization Guide](#2-beforeafter-test-hook-customization-guide)
+3. [Extending Health Check Tests](#3-extending-health-check-tests)
+4. [Testing Guide for Real vCenter Environments](#4-testing-guide-for-real-vcenter-environments)
 
 ---
 
-## 1. 框架执行机制说明
+## 1. Framework Execution Mechanism
 
-### 1.1 整体架构
+### 1.1 Overall Architecture
 
-测试框架采用**函数式组合**设计模式，完全摒弃继承，通过共享接口和上下文对象实现代码重用。
+The testing framework adopts a **functional composition** design pattern, completely eschewing inheritance. Code reuse is achieved through shared interfaces and context objects.
 
-```
+
+
 govsan/pkg/testsuite/
-├── core.go              # 核心工具包（导出接口）
-├── config/              # 配置测试子包
+├── core.go              # Core utility package (exported interfaces)
+├── config/              # Configuration test subpackage
 │   └── config_test.go
-├── health/              # 健康检查子包
+├── health/              # Health check subpackage
 │   └── health_test.go
-└── power/               # 性能测试子包
-    └── power_test.go
-```
+└── power/               # Performance test subpackage
+└── power_test.go
 
-### 1.2 核心组件
 
-#### 1.2.1 TestContext - 测试上下文
+### 1.2 Core Components
 
-```go
+#### 1.2.1 TestContext - Testing Context
+
+go
 type TestContext struct {
-    T         *testing.T      // Go 标准测试框架的测试对象
-    Ctx       context.Context // 上下文对象，用于协程通信
-    data      map[string]interface{} // 线程安全的数据存储
-    dataLock  sync.RWMutex    // 数据读写锁
-    StartTime time.Time       // 测试启动时间戳
+    T         *testing.T      // Go standard testing object
+    Ctx       context.Context // Context for goroutine communication
+    data      map[string]interface{} // Thread-safe data storage
+    dataLock  sync.RWMutex    // Data read/write lock
+    StartTime time.Time       // Test start timestamp
 }
-```
 
-**主要方法**：
-- `Set(key string, value interface{})`：存储测试数据
-- `Get(key string) (interface{}, bool)`：获取测试数据
-- `GetInt(key string, defaultVal int) int`：获取整数数据
 
-#### 1.2.2 TestManager - 生命周期管理器
+Main Methods:
 
-```go
+Set(key string, value interface{}): Store test data
+
+Get(key string) (interface{}, bool): Retrieve test data
+
+GetInt(key string, defaultVal int) int: Retrieve integer data
+
+1.2.2 TestManager - Lifecycle Manager
+Go
 type TestManager struct {
     beforeSuite []func()
     afterSuite  []func()
     beforeTest  []func(name string)
     afterTest   []func(name string)
 }
-```
 
-**主要方法**：
-- `BeforeSuite(fn func())`：注册套件前钩子
-- `AfterSuite(fn func())`：注册套件后钩子
-- `BeforeTest(fn func(name string))`：注册测试前钩子
-- `AfterTest(fn func(name string))`：注册测试后钩子
-- `RunSuite(t *testing.T, tests map[string]func(*TestContext))`：执行测试套件
 
-#### 1.2.3 辅助工具
+Main Methods:
 
-- **断言**：`Assertf`, `Requiref`, `RequireNoError`
-- **日志**：`Log`, `Logf`
+BeforeSuite(fn func()): Register a hook before the suite runs
 
-### 1.3 完整执行流程
+AfterSuite(fn func()): Register a hook after the suite completes
 
-```
-Test*TestSuite 入口
+BeforeTest(fn func(name string)): Register a hook before each test
+
+AfterTest(fn func(name string)): Register a hook after each test
+
+RunSuite(t *testing.T, tests map[string]func(*TestContext)): Execute the test suite
+
+1.2.3 Helper Tools
+
+Assertions: Assertf, Requiref, RequireNoError
+
+Logging: Log, Logf
+
+1.3 Execution Flow
+Test*TestSuite Entry Point
     │
-    ├─ 创建 TestManager
+    ├─ Create TestManager
     │
-    ├─ 创建 TestContext
+    ├─ Create TestContext
     │
-    ├─ 注册 BeforeSuite 钩子 ──→ 初始化资源
+    ├─ Register BeforeSuite Hooks ──→ Initialize resources
     │
-    ├─ 注册 AfterSuite 钩子 ──→ 清理资源
+    ├─ Register AfterSuite Hooks ──→ Cleanup resources
     │
-    ├─ RunSuite() 执行
+    ├─ RunSuite() Execution
     │   │
-    │   ├─ 执行 BeforeSuite 钩子链
+    │   ├─ Execute BeforeSuite hook chain
     │   │
-    │   ├─ 遍历测试用例
+    │   ├─ Iterate through test cases
     │   │   │
-    │   │   ├─ t.Run() 启动子测试
+    │   │   ├─ t.Run() start sub-test
     │   │   │   │
-    │   │   │   ├─ 执行 BeforeTest 钩子链
+    │   │   │   ├─ Execute BeforeTest hook chain
     │   │   │   │
-    │   │   │   ├─ defer 注册 AfterTest 钩子
+    │   │   │   ├─ defer register AfterTest hook
     │   │   │   │
-    │   │   │   ├─ 执行测试函数
+    │   │   │   ├─ Execute test function
     │   │   │   │
-    │   │   │   └─ 执行 AfterTest 钩子链
+    │   │   │   └─ Execute AfterTest hook chain
     │   │   │
-    │   │   └─ 下一个测试
+    │   │   └─ Next test
     │   │
-    │   └─ defer 执行 AfterSuite 钩子链
+    │   └─ defer Execute AfterSuite hook chain
     │
-    └─ 测试结束
-```
+    └─ Test End
 
-### 1.4 关键生命周期节点
-
-| 节点 | 执行时机 | 用途 |
-|------|---------|------|
-| BeforeSuite | 任何测试执行之前 | 建立数据库连接、初始化测试环境、加载配置 |
-| BeforeTest | 单个测试执行前 | 准备测试数据、记录开始时间、设置断点 |
-| AfterTest | 单个测试执行后 | 清理测试数据、记录结束时间、生成日志 |
-| AfterSuite | 所有测试执行后 | 关闭数据库连接、清理临时文件、生成报告 |
-
-### 1.5 模块间交互方式
-
-```
-子包 (config/health/power)
+1.4 Key Lifecycle Nodes
+Node	Timing	Purpose
+BeforeSuite	Before any tests run	Establish DB connections, initialize environment, load configs
+BeforeTest	Before an individual test	Prepare test data, record start time, set breakpoints
+AfterTest	After an individual test	Clean up test data, record end time, generate logs
+AfterSuite	After all tests complete	Close DB connections, clean up temporary files, generate reports
+1.5 Inter-module Interaction
+Subpackages (config/health/power)
     │
     ├─ import "govsan/pkg/testsuite"
     │
-    ├─ 使用 NewTestManager() 创建生命周期
-    ├─ 使用 NewTestContext(t) 创建上下文
-    ├─ 使用 Log/Logf 记录日志
-    ├─ 使用 Assertf/Requiref 进行断言
+    ├─ Use NewTestManager() to manage lifecycle
+    ├─ Use NewTestContext(t) to create context
+    ├─ Use Log/Logf for logging
+    ├─ Use Assertf/Requiref for assertions
     │
-    └─ 调用 lifecycle.RunSuite() 执行测试
-```
+    └─ Call lifecycle.RunSuite() to execute tests
 
----
+2. Before/After Test Hook Customization Guide
+2.1 How Hooks Work
 
-## 2. Before/After Test Hook 定制指南
+Hook functions are registered via chaining and are executed sequentially at the corresponding lifecycle node in the order they were registered.
 
-### 2.1 钩子工作原理
+Execution Order:
 
-钩子函数通过**链式注册**，在对应生命周期节点按注册顺序依次执行。
+Registration: Hook1 → Hook2 → Hook3
+Execution: Hook1 → Hook2 → Hook3
 
-**执行顺序**：
-```
-注册: Hook1 → Hook2 → Hook3
-执行: Hook1 → Hook2 → Hook3
-```
+2.2 Customizable Hook Types
+Hook Type	Function Signature	Parameter Description	Registration Method
+BeforeSuite	func()	None	lifecycle.BeforeSuite()
+AfterSuite	func()	None	lifecycle.AfterSuite()
+BeforeTest	func(name string)	name: Test name	lifecycle.BeforeTest()
+AfterTest	func(name string)	name: Test name	lifecycle.AfterTest()
+2.3 Use Cases
+2.3.1 BeforeSuite Hook
 
-### 2.2 可定制钩子类型
+Purpose: Resource Initialization
 
-| 钩子类型 | 函数签名 | 参数说明 | 注册方法 |
-|---------|---------|---------|---------|
-| BeforeSuite | `func()` | 无 | `lifecycle.BeforeSuite()` |
-| AfterSuite | `func()` | 无 | `lifecycle.AfterSuite()` |
-| BeforeTest | `func(name string)` | `name`: 测试名称 | `lifecycle.BeforeTest()` |
-| AfterTest | `func(name string)` | `name`: 测试名称 | `lifecycle.AfterTest()` |
-
-### 2.3 使用场景
-
-#### 2.3.1 BeforeSuite 钩子
-
-**用途**：资源初始化
-
-```go
+Go
 package health
 
 import (
@@ -170,155 +163,85 @@ func TestHealthTestSuite(t *testing.T) {
 
     var client *VSanClient
     lifecycle.BeforeSuite(func() {
-        testsuite.Log(ctx.T, "正在建立 VSAN 连接...")
-        // 初始化连接
+        testsuite.Log(ctx.T, "Establishing VSAN connection...")
+        // Initialize connection
         client = NewVSanClient("192.168.1.100")
         err := client.Connect()
-        testsuite.RequireNoError(ctx.T, err, "连接 VSAN 失败")
+        testsuite.RequireNoError(ctx.T, err, "Failed to connect to VSAN")
 
-        // 存储到上下文
+        // Store in context
         ctx.Set("vsan_client", client)
     })
 
-    // ... 注册其他钩子
-    // ... 执行测试
+    // ... Register other hooks
+    // ... Execute tests
 }
-```
 
-#### 2.3.2 AfterSuite 钩子
+2.3.2 AfterSuite Hook
 
-**用途**：资源清理
+Purpose: Resource Cleanup
 
-```go
+Go
 lifecycle.AfterSuite(func() {
     if client != nil {
-        testsuite.Log(ctx.T, "正在关闭 VSAN 连接...")
+        testsuite.Log(ctx.T, "Closing VSAN connection...")
         err := client.Disconnect()
         if err != nil {
-            testsuite.Log(ctx.T, "断开连接时出错:", err)
+            testsuite.Log(ctx.T, "Error during disconnect:", err)
         }
     }
 })
-```
 
-#### 2.3.3 BeforeTest 钩子
+2.3.3 BeforeTest Hook
 
-**用途**：测试准备
+Purpose: Test Preparation
 
-```go
+Go
 lifecycle.BeforeTest(func(name string) {
-    testsuite.Log(ctx.T, "===== 开始测试:", name, "=====")
+    testsuite.Log(ctx.T, "===== Starting Test:", name, "=====")
 
-    // 可以根据测试名称做不同的准备
+    // Specific preparation based on test name
     if strings.Contains(name, "Disk") {
-        testsuite.Log(ctx.T, "正在预热磁盘检查模块...")
+        testsuite.Log(ctx.T, "Warming up disk check module...")
     }
 })
-```
 
-#### 2.3.4 AfterTest 钩子
+2.3.4 AfterTest Hook
 
-**用途**：测试清理
+Purpose: Test Cleanup
 
-```go
+Go
 lifecycle.AfterTest(func(name string) {
-    testsuite.Log(ctx.T, "===== 测试结束:", name, "=====")
+    testsuite.Log(ctx.T, "===== Test Finished:", name, "=====")
 
-    // 清理该测试产生的数据
+    // Clean up data generated by this test
     if strings.Contains(name, "Object") {
-        testsuite.Log(ctx.T, "正在清理对象检查数据...")
+        testsuite.Log(ctx.T, "Cleaning up object check data...")
     }
 })
-```
 
-### 2.4 完整钩子示例
+3. Extending Health Check Tests
+3.1 Naming Conventions
 
-```go
-package config
+Follow Go testing file naming conventions:
 
-import (
-    "testing"
-    "time"
-    "govsan/pkg/testsuite"
-)
+Main test file: health_test.go
 
-func TestConfigTestSuite(t *testing.T) {
-    lifecycle := testsuite.NewTestManager()
-    ctx := testsuite.NewTestContext(t)
+Sub-module tests: {module}_health_test.go (e.g., disk_health_test.go)
 
-    var configMap map[string]interface{}
-
-    // ==================== BeforeSuite ====================
-    lifecycle.BeforeSuite(func() {
-        testsuite.Log(ctx.T, "[BeforeSuite] 初始化配置模块...")
-        configMap = make(map[string]interface{})
-        ctx.Set("config_map", configMap)
-        ctx.Set("start_time", time.Now())
-    })
-
-    // ==================== AfterSuite ====================
-    lifecycle.AfterSuite(func() {
-        startTime, _ := ctx.Get("start_time")
-        duration := time.Since(startTime.(time.Time))
-        testsuite.Logf(ctx.T, "[AfterSuite] 测试总耗时: %v", duration)
-    })
-
-    // ==================== BeforeTest ====================
-    lifecycle.BeforeTest(func(name string) {
-        testsuite.Log(ctx.T, "[BeforeTest] 准备执行:", name)
-        ctx.Set(name+"_start", time.Now())
-    })
-
-    // ==================== AfterTest ====================
-    lifecycle.AfterTest(func(name string) {
-        start, _ := ctx.Get(name + "_start")
-        duration := time.Since(start.(time.Time))
-        testsuite.Logf(ctx.T, "[AfterTest] %s 耗时: %v", name, duration)
-    })
-
-    // 测试用例
-    tests := map[string]func(*testsuite.TestContext){
-        "TestConfigLoading": func(ctx *testsuite.TestContext) {
-            testsuite.Log(ctx.T, "正在加载配置...")
-            testsuite.Assertf(ctx.T, true, "加载配置失败")
-        },
-        "TestConfigUpdate": func(ctx *testsuite.TestContext) {
-            testsuite.Log(ctx.T, "正在更新配置...")
-            testsuite.Assertf(ctx.T, true, "更新配置失败")
-        },
-    }
-
-    lifecycle.RunSuite(t, tests)
-}
-```
-
----
-
-## 3. 健康检查测试扩展步骤
-
-### 3.1 文件命名规范
-
-遵循 Go 测试文件命名规范：
-- **主测试文件**：`health_test.go`
-- **子模块测试**：`{模块名}_health_test.go`（如 `disk_health_test.go`）
-
-### 3.2 目录结构
-
-```
+3.2 Directory Structure
 pkg/testsuite/health/
-├── health_test.go              # 主测试套件
-├── disk_health_test.go         # 磁盘健康检查（新）
-├── object_health_test.go       # 对象健康检查（新）
-└── network_health_test.go      # 网络健康检查（新）
-```
+├── health_test.go              # Main test suite
+├── disk_health_test.go         # Disk health check (New)
+├── object_health_test.go       # Object health check (New)
+└── network_health_test.go      # Network health check (New)
 
-### 3.3 测试用例编写标准
+3.3 Test Case Writing Standards
+3.3.1 Creating a New Test File
 
-#### 3.3.1 新建测试文件
+Example disk_health_test.go:
 
-以 `disk_health_test.go` 为例：
-
-```go
+Go
 package health
 
 import (
@@ -326,37 +249,37 @@ import (
     "govsan/pkg/testsuite"
 )
 
-// ==================== 测试函数 ====================
+// ==================== Test Function ====================
 
 func TestDiskHealthTestSuite(t *testing.T) {
     lifecycle := testsuite.NewTestManager()
     ctx := testsuite.NewTestContext(t)
 
-    // 需要真实 vCenter 或 vcsim 连接
+    // Requires a real vCenter or vcsim connection
     vc, err := testsuite.SetupVCConnection(ctx)
     if err != nil || vc == nil {
-        t.Skip("需要 vCenter 或 vcsim 连接")
+        t.Skip("Requires vCenter or vcsim connection")
     }
 
     cluster, _ := ctx.Get("target_cluster")
     checker, _ := NewRealHealthChecker(ctx.Ctx, vc, cluster.(types.ManagedObjectReference))
     diskReports := make(map[string]DiskHealthReport)
 
-    // 注册钩子
+    // Register hooks
     lifecycle.BeforeSuite(func() {
-        testsuite.Log(ctx.T, "[DiskHealth] 初始化磁盘检查模块...")
+        testsuite.Log(ctx.T, "[DiskHealth] Initializing disk check module...")
         ctx.Set("disk_checker", checker)
     })
 
     lifecycle.BeforeTest(func(name string) {
-        testsuite.Log(ctx.T, "[DiskHealth] 准备:", name)
+        testsuite.Log(ctx.T, "[DiskHealth] Preparing:", name)
     })
 
     lifecycle.AfterTest(func(name string) {
-        testsuite.Log(ctx.T, "[DiskHealth] 完成:", name)
+        testsuite.Log(ctx.T, "[DiskHealth] Finished:", name)
     })
 
-    // 定义测试用例
+    // Define test cases
     tests := map[string]func(*testsuite.TestContext){
         "TestDiskCapacity": func(ctx *testsuite.TestContext) {
             testDiskCapacity(ctx, checker, &diskReports)
@@ -364,15 +287,12 @@ func TestDiskHealthTestSuite(t *testing.T) {
         "TestDiskLatency": func(ctx *testsuite.TestContext) {
             testDiskLatency(ctx, checker, &diskReports)
         },
-        "TestDiskErrorRate": func(ctx *testsuite.TestContext) {
-            testDiskErrorRate(ctx, checker, &diskReports)
-        },
     }
 
     lifecycle.RunSuite(t, tests)
 }
 
-// ==================== 测试用例实现 ====================
+// ==================== Test Case Implementation ====================
 
 type DiskHealthReport struct {
     Path       string
@@ -381,19 +301,19 @@ type DiskHealthReport struct {
 }
 
 func testDiskCapacity(ctx *testsuite.TestContext, checker *HealthChecker, reports *map[string]DiskHealthReport) {
-    testsuite.Log(ctx.T, "测试磁盘容量...")
+    testsuite.Log(ctx.T, "Testing disk capacity...")
 
     disks, err := checker.ListDisks()
-    testsuite.RequireNoError(ctx.T, err, "获取磁盘列表失败")
+    testsuite.RequireNoError(ctx.T, err, "Failed to list disks")
 
     for _, disk := range disks {
         cap, err := checker.CheckDiskCapacity(disk.Path)
         testsuite.RequireNoError(ctx.T, err)
 
-        // 断言容量大于阈值
-        testsuite.Assertf(ctx.T, cap >= 100, "磁盘 %s 容量不足 (需要 100GB, 实际 %dGB)", disk.Path, cap)
+        // Assert capacity is above threshold
+        testsuite.Assertf(ctx.T, cap >= 100, "Disk %s low capacity (Need 100GB, Got %dGB)", disk.Path, cap)
 
-        // 存储报告
+        // Store report
         (*reports)[disk.Path] = DiskHealthReport{
             Path:       disk.Path,
             CapacityGB: cap,
@@ -402,225 +322,107 @@ func testDiskCapacity(ctx *testsuite.TestContext, checker *HealthChecker, report
     }
 }
 
-func testDiskLatency(ctx *testsuite.TestContext, checker *HealthChecker, reports *map[string]DiskHealthReport) {
-    testsuite.Log(ctx.T, "测试磁盘延迟...")
+3.4 Registering New Tests
 
-    disks, err := checker.ListDisks()
-    testsuite.RequireNoError(ctx.T, err, "获取磁盘列表失败")
+No additional configuration is required; the Go test tool automatically identifies new test files.
 
-    for _, disk := range disks {
-        latency, err := checker.MeasureDiskLatency(disk.Path)
-        testsuite.RequireNoError(ctx.T, err)
+How to run:
 
-        testsuite.Assertf(ctx.T, latency < 100.0, "磁盘 %s 延迟过高 (%.2fms)", disk.Path, latency)
-    }
-}
-
-func testDiskErrorRate(ctx *testsuite.TestContext, checker *HealthChecker, reports *map[string]DiskHealthReport) {
-    testsuite.Log(ctx.T, "测试磁盘错误率...")
-
-    // 实现细节...
-}
-```
-
-### 3.4 注册新测试到框架
-
-**新测试文件无需额外配置**，Go 测试工具会自动识别。
-
-运行方式：
-```bash
-# 运行所有 health 测试
+Bash
+# Run all health tests
 go test -v ./pkg/testsuite/health/
 
-# 运行特定测试
+# Run a specific test suite
 go test -v ./pkg/testsuite/health -run TestDiskHealthTestSuite
-go test -v ./pkg/testsuite/health -run TestDiskHealthTestSuite/TestDiskCapacity
-```
 
-### 3.5 依赖管理
+3.5 Dependency Management
 
-确保新测试正确导入核心包：
+Ensure new tests correctly import the core package:
 
-```go
+Go
 import "govsan/pkg/testsuite"
-```
 
-使用 Go 模块系统管理依赖：
-```bash
-cd /home/lei/codes/govsan
+
+Use Go modules to manage dependencies:
+
+Bash
 go mod tidy
-```
 
-### 3.6 多文件测试示例
+4. Testing Guide for Real vCenter Environments
+4.1 Environment Preparation
 
-当一个模块有多个测试文件时：
+Set the following environment variables before running tests:
 
-```
-health/
-├── health_test.go          # 主套件（含 TestHealthTestSuite）
-├── disk_health_test.go     # 磁盘套件（含 TestDiskHealthTestSuite）
-└── object_health_test.go   # 对象套件（含 TestObjectHealthTestSuite）
-```
-
-运行所有：
-```bash
-go test -v ./pkg/testsuite/health/
-```
-
-运行单个：
-```bash
-go test -v ./pkg/testsuite/health -run TestDiskHealthTestSuite
-```
-
-### 3.7 验证扩展
-
-添加新测试后，执行完整测试验证：
-
-```bash
-# 完整测试
-cd /home/lei/codes/govsan
-go test -v ./pkg/testsuite/...
-
-# 预期输出类似
-# ok    govsan/pkg/testsuite/config    0.002s
-# ok    govsan/pkg/testsuite/health    0.003s
-# ok    govsan/pkg/testsuite/power     0.003s
-```
-
----
-
-## 4. 针对真实 vCenter 测试指南
-
-### 4.1 环境准备
-
-在运行测试前，需要设置以下环境变量：
-
-```bash
-# 必需变量
-export GOVC_URL="https://your-vcenter.example.com/sdk"
+Bash
+# Required variables
+export GOVC_URL="[https://your-vcenter.example.com/sdk](https://your-vcenter.example.com/sdk)"
 export GOVC_USERNAME="administrator@vsphere.local"
 export GOVC_PASSWORD="your-password"
 
-# 可选变量
-export GOVC_INSECURE="true"                    # 跳过证书验证（测试环境常用）
-export VSAN_CLUSTER_PATH="/datacenter/cluster" # 指定目标集群路径
-```
+# Optional variables
+export GOVC_INSECURE="true"                    # Skip cert verification (common for test envs)
+export VSAN_CLUSTER_PATH="/datacenter/cluster" # Specify target cluster path
 
-### 4.2 使用 vcsim 模拟器（开发推荐）
+4.2 Using vcsim Simulator (Recommended for Dev)
 
-如果没有真实 vCenter，可以使用 govmomi 自带的模拟器：
+If a real vCenter is unavailable, use the simulator provided by govmomi:
 
-```bash
-# 启动 vcsim
+Bash
+# Start vcsim
 vcsim -start
 
-# 设置环境变量指向模拟器
+# Point environment variables to the simulator
 export GOVC_URL="https://localhost:8989/sdk"
 export GOVC_USERNAME="user"
 export GOVC_PASSWORD="password"
 export GOVC_INSECURE="true"
-```
 
-### 4.3 运行测试命令
-
-```bash
-# 运行所有测试
-cd /home/lei/codes/govsan
-go test -v ./pkg/testsuite/...
-
-# 运行特定模块
-go test -v ./pkg/testsuite/health/
-go test -v ./pkg/testsuite/health -run TestHealthTestSuite
-
-# 只运行特定测试用例
-go test -v ./pkg/testsuite/health -run TestHealthTestSuite/TestClusterSummary
-```
-
-### 4.4 测试执行流程
-
-```
+4.3 Execution Flow
 ┌─────────────────────────────────────────────────────────────┐
-│  1. BeforeSuite 阶段                                        │
-│     └─ SetupVCConnection() 建立 vCenter 连接                 │
-│         ├─ 读取环境变量 (GOVC_URL, GOVC_USERNAME, ...)       │
-│         ├─ 建立 govmomi.Client 连接                         │
-│         ├─ 初始化 vSAN Client                               │
-│         └─ 查找目标集群并存入 TestContext                    │
+│  1. BeforeSuite Phase                                       │
+│     └─ SetupVCConnection() Establish vCenter connection      │
+│         ├─ Read env vars (GOVC_URL, GOVC_USERNAME, ...)     │
+│         ├─ Establish govmomi.Client connection              │
+│         ├─ Initialize vSAN Client                           │
+│         └─ Find target cluster and store in TestContext     │
 ├─────────────────────────────────────────────────────────────┤
-│  2. 测试执行阶段                                            │
-│     └─ 使用 RealHealthChecker 调用真实 vSAN API             │
+│  2. Test Execution Phase                                    │
+│     └─ Use RealHealthChecker to call real vSAN APIs         │
 │         ├─ CheckObjectHealth() → VsanQueryObjectIdentities  │
 │         ├─ CheckDiskHealth()   → VsanClusterGetConfig       │
-│         ├─ CheckNetworkHealth() → 查询主机网络信息          │
-│         └─ CheckDataEfficiency() → 查询性能指标             │
+│         ├─ CheckNetworkHealth() → Query host network info   │
+│         └─ CheckDataEfficiency() → Query performance metrics│
 ├─────────────────────────────────────────────────────────────┤
-│  3. AfterSuite 阶段                                         │
-│     └─ checker.Close() 关闭 vCenter 连接                    │
+│  3. AfterSuite Phase                                        │
+│     └─ checker.Close() Close vCenter connection             │
 └─────────────────────────────────────────────────────────────┘
-```
 
-### 4.5 测试输出示例
-
-```bash
+4.4 Test Output Example
+Bash
 $ go test -v ./pkg/testsuite/health -run TestHealthTestSuite
 
 === RUN   TestHealthTestSuite
     health_test.go:18: Setting up HealthTestSuite...
     health_test.go:21: Connecting to vCenter (real or vcsim)...
     health_test.go:25: Successfully connected to vCenter/vcsim
-    health_test.go:43: Using RealHealthChecker with real vSAN API calls
-=== RUN   TestHealthTestSuite/TestClusterSummary
-    health_test.go:93: Running TestClusterSummary...
-    health_test.go:96: Cluster summary: 4 checks, 4 OK, 0 Warning, 0 Error
-=== RUN   TestHealthTestSuite/TestVsanClusterHealth
-    health_test.go:75: Running TestVsanClusterHealth...
-    health_test.go:82: Object Health: OK - Object health is normal...
-    health_test.go:83: Disk Health: OK - Disk health is normal...
-    ...
 --- PASS: TestHealthTestSuite (15.23s)
-    --- PASS: TestHealthTestSuite/TestClusterSummary (2.15s)
-    --- PASS: TestHealthTestSuite/TestVsanClusterHealth (13.08s)
 PASS
 ok      govsan/pkg/testsuite/health     15.251s
-```
 
-### 4.6 场景行为说明
+Appendix
+A. Run Commands
+Command	Purpose
+go test -v ./pkg/testsuite/...	Run all tests
+go test -v ./pkg/testsuite/config/	Run a specific module
+go test -v ./pkg/testsuite/health -run TestX	Run a specific test function
+B. Project Contact
 
-| 场景 | 行为 |
-|------|------|
-| 已配置 GOVC_URL | 执行真实 API 调用测试 |
-| 未配置 GOVC_URL | 测试自动跳过（`t.Skip()`） |
-| 连接失败 | 测试跳过并记录错误信息 |
-| 证书验证失败 | 设置 `GOVC_INSECURE=true` |
+If you have any questions, please contact the maintenance team.
 
-### 4.7 推荐工作流程
+<task_progress>
 
-```bash
-# 1. 在终端设置环境变量（或写入 ~/.bashrc）
-export GOVC_URL="https://vc.example.com/sdk"
-export GOVC_USERNAME="admin@vsphere.local"
-export GOVC_PASSWORD="secret"
-export GOVC_INSECURE="true"
+[x] Translate README.md to English
 
-# 2. 运行测试
-go test -v ./pkg/testsuite/health/
-
-# 3. 查看测试报告
-# PASS/FAIL 结果会显示每个测试的执行情况
-```
-
----
-
-## 附录
-
-### A. 运行测试命令
-
-| 命令 | 用途 |
-|------|------|
-| `go test -v ./pkg/testsuite/...` | 运行所有测试 |
-| `go test -v ./pkg/testsuite/config/` | 运行特定模块 |
-| `go test -v ./pkg/testsuite/health -run TestX` | 运行特定测试函数 |
-
-### B. 项目联系方式
-
-如有问题，请联系维护团队。
+[x] Update README.md file
+</task_progress>
+</write_to_file>
