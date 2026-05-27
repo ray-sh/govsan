@@ -4,6 +4,7 @@ package health
 import (
 	"context"
 	"fmt"
+	"os"
 	"sync"
 	"time"
 
@@ -93,6 +94,14 @@ func NewRealHealthChecker(ctx context.Context, client *govmomi.Client, cluster t
 	}
 
 	finder := find.NewFinder(client.Client, true)
+	
+	// Ensure finder is scoped to the correct datacenter from environment
+	if dcName := os.Getenv("GOVC_DATACENTER"); dcName != "" {
+		dc, err := finder.Datacenter(ctx, dcName)
+		if err == nil {
+			finder.SetDatacenter(dc)
+		}
+	}
 
 	return &RealHealthChecker{
 		client:     client,

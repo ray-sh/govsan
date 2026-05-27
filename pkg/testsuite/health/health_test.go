@@ -3,6 +3,7 @@ package health
 import (
 	"testing"
 
+	"github.com/vmware/govmomi"
 	"github.com/vmware/govmomi/vim25/types"
 
 	"govsan/pkg/testsuite"
@@ -10,35 +11,27 @@ import (
 
 func TestHealthTestSuite(t *testing.T) {
 	ctx := testsuite.NewTestContext(t)
-	lifecycle := testsuite.NewTestManager(ctx)
+	// Use WithVC() to automatically handle connection and cleanup
+	lifecycle := testsuite.NewTestManager(ctx).WithVC()
 
 	var checker *RealHealthChecker
 
 	lifecycle.BeforeSuite(func() {
 		testsuite.Log(ctx.T, "Setting up HealthTestSuite...")
 
-		// Connect to vCenter or vcsim using lifecycle helper
-		testsuite.Log(ctx.T, "Connecting to vCenter (real or vcsim)...")
-		vc, err := lifecycle.SetupVCConnection()
-		if err != nil || vc == nil {
-			return // Skip already handled by SetupVCConnection
-		}
-		testsuite.Log(ctx.T, "Successfully connected to vCenter/vcsim")
+		// Get connection and cluster from context (set by WithVC/SetupVCConnection)
+		vcVal, _ := ctx.Get("vc_client")
+		clusterVal, _ := ctx.Get("target_cluster")
 
-		// Get cluster from context (set by SetupVCConnection)
-		clusterVal, ok := ctx.Get("target_cluster")
-		if !ok || clusterVal == nil {
-			t.Skip("Skipping test: No target cluster found in context")
-			return
+		if vcVal == nil || clusterVal == nil {
+			return // SetupVCConnection already handled the Skip/Log
 		}
 
-		cluster, ok := clusterVal.(types.ManagedObjectReference)
-		if !ok {
-			t.Skip("Skipping test: Invalid cluster type in context")
-			return
-		}
+		vc := vcVal.(*govmomi.Client)
+		cluster := clusterVal.(types.ManagedObjectReference)
 
 		// Create RealHealthChecker with actual API calls
+		var err error
 		checker, err = NewRealHealthChecker(ctx.Ctx, vc, cluster)
 		if err != nil {
 			t.Skipf("Skipping test: Failed to create RealHealthChecker: %v", err)
@@ -58,14 +51,6 @@ func TestHealthTestSuite(t *testing.T) {
 
 	lifecycle.AfterSuite(func() {
 		testsuite.Log(ctx.T, "Tearing down HealthTestSuite...")
-
-		// Cleanup vCenter connection
-		if checker != nil {
-			testsuite.Log(ctx.T, "Closing vCenter connection...")
-			if err := checker.Close(); err != nil {
-				testsuite.Logf(ctx.T, "Error closing connection: %v", err)
-			}
-		}
 	})
 
 	tests := map[string]func(*testsuite.TestContext){

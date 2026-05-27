@@ -169,34 +169,17 @@ func SetupVCConnection(tc *TestContext) (*govmomi.Client, error) {
 	}
 	vsanService := vsan.NewService(vsanClient)
 
-	// 5. 寻找目标集群
-	finder := find.NewFinder(govmomiClient.Client, true)
-	var clusterRef types.ManagedObjectReference
-
-	if clusterPath != "" {
-		cluster, err := finder.ClusterComputeResource(connectCtx, clusterPath)
-		if err != nil {
-			govmomiClient.Logout(context.Background())
-			return nil, err
-		}
-		clusterRef = cluster.Reference()
-	} else {
-		clusters, err := finder.ClusterComputeResourceList(connectCtx, "*")
-		if err != nil {
-			govmomiClient.Logout(context.Background())
-			return nil, err
-		}
-		if len(clusters) == 0 {
-			govmomiClient.Logout(context.Background())
-			return nil, errors.New("vCenter 中没有找到任何集群")
-		}
-		clusterRef = clusters[0].Reference()
-		Logf(tc.T, "自动选择集群: %s", clusters[0].Name())
+	// 5. 调用 Service 寻找目标集群
+	clusterRef, err := vsanService.FindCluster(connectCtx, govmomiClient.Client, clusterPath)
+	if err != nil {
+		govmomiClient.Logout(context.Background())
+		return nil, err
 	}
 
 	// 6. 存入上下文
 	tc.Set("vsan_service", vsanService)
 	tc.Set("target_cluster", clusterRef)
+	tc.Set("vc_client", govmomiClient)
 	tc.Set("initialized", true)
 
 	return govmomiClient, nil
@@ -206,9 +189,10 @@ func SetupVCConnection(tc *TestContext) (*govmomi.Client, error) {
 // 生命周期管理
 // =============================================================================
 
-// TestManager 管理测试生命周期钩子
+// TestManager manages test lifecycle hooks
 type TestManager struct {
 	parentCtx   *TestContext
+	vcClient    *govmomi.Client
 	beforeSuite []func()
 	afterSuite  []func()
 	beforeTest  []func(name string)
@@ -261,33 +245,50 @@ func (tm *TestManager) BeforeTest(fn func(name string)) {
 	tm.beforeTest = append(tm.beforeTest, fn)
 }
 
-// AfterTest 注册测试后钩子
+// AfterTest registers an after-test hook
 func (tm *TestManager) AfterTest(fn func(name string)) {
 	tm.afterTest = append(tm.afterTest, fn)
 }
 
-// RunSuite 运行测试套件
+// WithVC adds automatic vCenter connection management to the suite lifecycle.
+// It handles connection setup in BeforeSuite and automatic logout in AfterSuite.
+func (tm *TestManager) WithVC() *TestManager {
+	tm.BeforeSuite(func() {
+		client, _ := tm.SetupVCConnection()
+		tm.vcClient = client
+	})
+
+	tm.AfterSuite(func() {
+		if tm.vcClient != nil {
+			Log(tm.parentCtx.T, "Automatically closing vCenter connection...")
+			tm.vcClient.Logout(context.Background())
+		}
+	})
+	return tm
+}
+
+// RunSuite runs the test suite
 func (tm *TestManager) RunSuite(t *testing.T, tests map[string]func(*TestContext)) {
 	t.Helper()
 
-	// 执行套件前钩子
+	// Execute suite-level before hooks
 	for _, fn := range tm.beforeSuite {
 		fn()
 	}
 
-	// 执行测试后清理钩子
+	// Execute suite-level after hooks
 	defer func() {
 		for _, fn := range tm.afterSuite {
 			fn()
 		}
 	}()
 
-	// 逐个执行测试用例
+	// Execute test cases one by one
 	for name, testFn := range tests {
 		t.Run(name, func(subT *testing.T) {
 			subT.Helper()
 
-			// 核心修复：通过 NewChildContext 深度拷贝父级上下文里的连接会话数据
+			// Core Fix: Depth copy parent context data using NewChildContext
 			var subCtx *TestContext
 			if tm.parentCtx != nil {
 				subCtx = NewChildContext(subT, tm.parentCtx)
@@ -295,13 +296,13 @@ func (tm *TestManager) RunSuite(t *testing.T, tests map[string]func(*TestContext
 				subCtx = NewTestContext(subT)
 			}
 
-			// 执行单项测试前钩子
+			// Execute before-test hooks
 			for _, fn := range tm.beforeTest {
 				fn(name)
 			}
 
 			defer func() {
-				// 执行单项测试后钩子
+				// Execute after-test hooks
 				for _, fn := range tm.afterTest {
 					fn(name)
 				}

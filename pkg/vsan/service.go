@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 
+	"github.com/vmware/govmomi/find"
+	"github.com/vmware/govmomi/vim25"
 	"github.com/vmware/govmomi/vim25/types"
 	vsantypes "github.com/vmware/govmomi/vsan/types"
 )
@@ -20,6 +22,31 @@ func NewService(client *Client) *Service {
 	return &Service{
 		client: client,
 	}
+}
+
+// FindCluster 根据路径或通配符寻找集群引用
+func (s *Service) FindCluster(ctx context.Context, vimClient *vim25.Client, clusterPath string) (types.ManagedObjectReference, error) {
+	finder := find.NewFinder(vimClient, true)
+
+	// 如果指定了路径
+	if clusterPath != "" {
+		cluster, err := finder.ClusterComputeResource(ctx, clusterPath)
+		if err != nil {
+			return types.ManagedObjectReference{}, err
+		}
+		return cluster.Reference(), nil
+	}
+
+	// 否则默认查找第一个
+	clusters, err := finder.ClusterComputeResourceList(ctx, "*")
+	if err != nil {
+		return types.ManagedObjectReference{}, err
+	}
+	if len(clusters) == 0 {
+		return types.ManagedObjectReference{}, errors.New("no clusters found in vCenter")
+	}
+
+	return clusters[0].Reference(), nil
 }
 
 // GetClusterConfig 获取 vSAN 集群的基础配置
